@@ -1,0 +1,34 @@
+---
+- name: Deploy Verifiable Intelligence Engine
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Apply Kubernetes deployment
+      kubernetes.core.k8s:
+        src: k8s/deployment.yml
+    - name: Wait for VIE deployment to be ready
+      kubernetes.core.k8s_info:
+        kind: Pod
+        label_selectors:
+          - app=vie
+      register: pod_info
+      until: pod_info.resources | length > 0 and (pod_info.resources | map(attribute='status.phase') | list | unique | length == 1) and (pod_info.resources | map(attribute='status.phase') | list | unique)[0] == 'Running'
+      retries: 30
+      delay: 10
+    - name: Scale VIE deployment (if replicas defined)
+      kubernetes.core.k8s_scale:
+        api_version: apps/v1
+        kind: Deployment
+        name: vie-deployment
+        namespace: default
+        replicas: "{{ replicas | default(1) }}"
+      when: replicas is defined
+    - name: Display VIE service URL
+      kubernetes.core.k8s_info:
+        kind: Service
+        name: vie-service
+      register: service_info
+      when: "'minikube' in ansible_facts.distribution | lower or 'eks' in ansible_facts.distribution | lower"
+    - debug:
+        msg: "Verifiable Intelligence Engine accessible at: {{ service_info.resources[0].status.loadBalancer.ingress[0].hostname if service_info.resources | length > 0 and service_info.resources[0].status.loadBalancer.ingress | length > 0 else 'Check your cloud LoadBalancer IP' }}"
+      when: service_info is defined
